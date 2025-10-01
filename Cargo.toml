@@ -5,10 +5,23 @@ edition = "2021"
 
 
 [dependencies]
+# Web serving
 actix-web = "4"
-rand = "0.9.2"
-rusqlite = { version = "0.36.0", features = ["bundled"] }
+actix-files = "0.6"
+
+# Database
+rand = "0.9" # for slug generation
+rusqlite = { version = "0.36", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
+
+# Password hasing
+rand_core = { version = "0.6", features = ["getrandom"] }  # for OsRng compatible with argon2
+argon2 = "0.5"
+base64 = "0.21"
+
+# Seralisation
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"

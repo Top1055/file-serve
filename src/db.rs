@@ -1,4 +1,7 @@
 // src/db.rs
+use argon2::password_hash::{Error as PwHashError, PasswordHash, PasswordVerifier, SaltString};
+use argon2::{Argon2, PasswordHasher};
+use rand_core::OsRng;
 use rusqlite::{params, Connection, OptionalExtension};
 
 #[derive(Debug, Clone)]
@@ -6,7 +9,7 @@ pub struct FileEntry {
     pub id: String,
     pub abs_path: String,
     pub name: String,
-    pub size_bytes: u64,
+    pub size_bytes: i64,
     pub created_at: String,
 }
 
@@ -16,9 +19,21 @@ pub struct Share {
     pub file_id: String,
     pub expires_at: Option<String>,
     pub max_downloads: Option<i64>,
-    pub dl_count: u64,
+    pub dl_count: i64,
     pub password_hash: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PublicShare {
+    pub slug: String,
+    pub file_name: String,
+    pub file_size: i64,
+    pub created_at: String,
+    pub dl_count: i64,
+    pub max_downloads: Option<i64>,
+    pub expires_at: Option<String>,
+    pub password_required: bool,
 }
 
 const SLUG_SIZE: usize = 8;
@@ -29,6 +44,34 @@ fn gen_slug(len: usize) -> String {
         .take(len)
         .map(char::from)
         .collect()
+}
+
+// ————— Password Hashing —————
+
+/// # Errors
+///
+/// broken salt cannot fail here
+/// if the input is gigabytes of data, it can overflow
+/// if the OS's rng fails, this can trip up
+/// using Argon2 default, so no config errors
+pub fn hash_password(password: &str) -> Result<String, PwHashError> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2
+        .hash_password(password.as_bytes(), &salt)?
+        .to_string();
+    Ok(password_hash)
+}
+
+pub fn verify_password(password: &str, hash: &str) -> bool {
+    let parsed_hash = PasswordHash::new(hash);
+    if let Ok(parsed) = parsed_hash {
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok()
+    } else {
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -77,6 +120,7 @@ impl Db {
     /// Will error if failing to resolve path,
     /// lacking permissions to access file's metadata,
     /// unable to write to db
+    /// Will also fail if the file size is so large it exceeds u32 or i64
     pub fn create_or_get_file(&self, abs_path: &str) -> Result<FileEntry, rusqlite::Error> {
         use std::fs;
 
@@ -97,7 +141,8 @@ impl Db {
             .and_then(|n| n.to_str())
             .unwrap_or("unnamed")
             .to_string();
-        let size_bytes = metadata.len() as u64;
+        let size_u = metadata.len();
+        let size_bytes = i64::try_from(size_u).map_err(|_| rusqlite::Error::InvalidQuery)?; // This file is WAY too large
         let id = uuid::Uuid::new_v4().to_string();
 
         self.con.execute(
@@ -141,6 +186,46 @@ impl Db {
                 },
             )
             .optional()
+    }
+
+    /// # Errors
+    ///
+    /// Will error if unable to delete file or file doesn't exist
+    /// FK inside shares is set to CASCADE, so no error there
+    pub fn delete_file(&self, file_id: &str) -> Result<bool, rusqlite::Error> {
+        let changed = self
+            .con
+            .execute("DELETE FROM file WHERE id = ?1", params![file_id])?;
+        Ok(changed > 0)
+    }
+
+    // ————— share CRUD (Admin) —————
+
+    /// # Errors
+    ///
+    /// Fails only with generic db failure to read
+    pub fn list_shares(&self) -> Result<Vec<Share>, rusqlite::Error> {
+        let mut stmt = self.con.prepare(
+            "SELECT slug, file_id, expires_at, max_downloads, dl_count, password_hash, created_at
+             FROM share ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Share {
+                slug: r.get(0)?,
+                file_id: r.get(1)?,
+                expires_at: r.get(2)?,
+                max_downloads: r.get(3)?,
+                dl_count: r.get(4)?,
+                password_hash: r.get(5)?,
+                created_at: r.get(6)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// # Errors
@@ -232,14 +317,52 @@ impl Db {
         Ok(changed > 0)
     }
 
-    /// # Errors
+    // ————— share CRUD (User) —————
+
     ///
-    /// Will error if unable to delete file or file doesn't exist
-    /// FK inside shares is set to CASCADE, so no error there
-    pub fn delete_file(&self, file_id: &str) -> Result<bool, rusqlite::Error> {
-        let changed = self
-            .con
-            .execute("DELETE FROM file WHERE id = ?1", params![file_id])?;
-        Ok(changed > 0)
+    pub fn get_public_info(&self, slug: &str) -> Result<Option<PublicShare>, rusqlite::Error> {
+        self.con
+            .query_row(
+                "
+            SELECT
+                s.slug,
+                f.name,
+                f.size_bytes,
+                f.created_at,
+                s.dl_count,
+                s.max_downloads,
+                s.expires_at,
+                s.password_hash IS NOT NULL
+            FROM share s
+            JOIN file f ON s.file_id = f.id
+            WHERE s.slug = ?1
+            ",
+                params![slug],
+                |r| {
+                    Ok(PublicShare {
+                        slug: r.get(0)?,
+                        file_name: r.get(1)?,
+                        file_size: r.get(2)?,
+                        created_at: r.get(3)?,
+                        dl_count: r.get(4)?,
+                        max_downloads: r.get(5)?,
+                        expires_at: r.get(6)?,
+                        password_required: r.get(7)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    /// #Errors
+    ///
+    /// Will error if the slug is false
+    pub fn check_password(&self, slug: &str, input: &str) -> Result<bool, rusqlite::Error> {
+        let share = self.get_share(slug)?.ok_or(rusqlite::Error::InvalidQuery)?;
+
+        match &share.password_hash {
+            None => Ok(true),
+            Some(hash) => Ok(verify_password(input, hash)),
+        }
     }
 }
