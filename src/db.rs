@@ -319,8 +319,10 @@ impl Db {
 
     // ————— share CRUD (User) —————
 
+    /// # Errors
     ///
-    pub fn get_public_info(&self, slug: &str) -> Result<Option<PublicShare>, rusqlite::Error> {
+    /// if unable to unwrap variables or fetch from db
+    pub fn get_public_share(&self, slug: &str) -> Result<Option<PublicShare>, rusqlite::Error> {
         self.con
             .query_row(
                 "
@@ -354,15 +356,76 @@ impl Db {
             .optional()
     }
 
-    /// #Errors
+    /// # Errors
     ///
     /// Will error if the slug is false
-    pub fn check_password(&self, slug: &str, input: &str) -> Result<bool, rusqlite::Error> {
+    fn check_password(&self, slug: &str, input: &str) -> Result<bool, rusqlite::Error> {
         let share = self.get_share(slug)?.ok_or(rusqlite::Error::InvalidQuery)?;
 
         match &share.password_hash {
             None => Ok(true),
             Some(hash) => Ok(verify_password(input, hash)),
         }
+    }
+
+    /// #Errors
+    ///
+    /// failure if slug is wrong or db unreachable
+    fn increase_dl(&self, slug: &str) -> Result<bool, rusqlite::Error> {
+        let dl_count: i64 = self
+            .con
+            .query_one(
+                "SELECT dl_count FROM share WHERE slug = ?1",
+                params![slug],
+                |r| Ok(r.get(0)?),
+            )
+            .optional()?
+            .unwrap_or(-1);
+
+        if dl_count < 0 {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+
+        let res = self.con.execute(
+            "UPDATE share SET dl_count = ?1 WHERE slug = ?2",
+            params![dl_count + 1, slug],
+        )?;
+
+        Ok(res > 0)
+    }
+
+    /// # Errors
+    ///
+    /// basic fail cases
+    /// runs check_password and increased_dl
+    /// if return error is UnwindingPanic: failed auth
+    pub fn get_download_target(
+        &self,
+        slug: &str,
+        password: &str,
+    ) -> Result<Option<(String, String)>, rusqlite::Error> {
+        let authenticated = self.check_password(slug, password)?;
+        if !authenticated {
+            return Err(rusqlite::Error::UnwindingPanic);
+        }
+
+        let abs_path = self
+            .con
+            .query_one(
+                "SELECT f.abs_path, f.name
+            FROM share s
+            JOIN file f ON s.file_id = f.id
+            WHERE s.slug = ?1",
+                params![slug],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional();
+
+        let increased_dl = self.increase_dl(slug)?;
+        if !increased_dl {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+
+        return abs_path;
     }
 }
