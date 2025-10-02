@@ -3,8 +3,9 @@ use argon2::password_hash::{Error as PwHashError, PasswordHash, PasswordVerifier
 use argon2::{Argon2, PasswordHasher};
 use rand_core::OsRng;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     pub id: String,
     pub abs_path: String,
@@ -13,7 +14,15 @@ pub struct FileEntry {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Deserialize)]
+struct CreateShareReq {
+    abs_path: String,
+    password: Option<String>,
+    expires_at: Option<String>,
+    max_downloads: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Share {
     pub slug: String,
     pub file_id: String,
@@ -24,7 +33,7 @@ pub struct Share {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicShare {
     pub slug: String,
     pub file_name: String,

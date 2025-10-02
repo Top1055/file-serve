@@ -11,7 +11,7 @@ actix-files = "0.6"
 
 # Database
 rand = "0.9" # for slug generation
-rusqlite = { version = "0.36", features = ["bundled"] }
+rusqlite = { version = "0.36", features = ["bundled", "unlock_notify"] }
 uuid = { version = "1", features = ["v4"] }
 
 # Password hasing
