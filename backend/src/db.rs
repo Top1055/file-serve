@@ -15,7 +15,7 @@ pub struct FileEntry {
 }
 
 #[derive(Deserialize)]
-struct CreateShareReq {
+pub struct CreateShareReq {
     abs_path: String,
     password: Option<String>,
     expires_at: Option<String>,
@@ -266,16 +266,14 @@ impl Db {
     ///
     /// Can fail if random generation of slugs fails 5 times
     /// other than that, simple read-write server issues or missing file
-    pub fn create_share(&self, new_share: &Share) -> Result<Share, rusqlite::Error> {
-        // Check if file exists
-        let file_exists: bool = self.con.query_one(
-            "SELECT EXISTS(SELECT 1 FROM file WHERE id = ?1)",
-            params![new_share.file_id],
-            |r| r.get(0),
-        )?;
-        if !file_exists {
-            return Err(rusqlite::Error::InvalidQuery);
-        }
+    pub fn create_share(&self, new_share: &CreateShareReq) -> Result<Share, rusqlite::Error> {
+        // If there is a password, attempt to hash it
+        let hashed_password: Option<String> = match &new_share.password {
+            Some(pw) => Some(hash_password(pw).map_err(|_| rusqlite::Error::InvalidQuery)?),
+            None => None,
+        };
+        // Check if file exists, if not, create one!
+        let file = self.create_or_get_file(&new_share.abs_path)?;
 
         let mut slug = gen_slug(SLUG_SIZE);
         let mut attempts = 0;
@@ -298,15 +296,16 @@ impl Db {
         }
 
         // Add to db
+
         let res = self.con.execute(
             "INSERT INTO share (slug, file_id, expires_at, max_downloads, password_hash)
             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 slug,
-                new_share.file_id,
+                file.id,
                 new_share.expires_at,
                 new_share.max_downloads,
-                new_share.password_hash
+                hashed_password,
             ],
         );
 

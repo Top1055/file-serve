@@ -3,7 +3,7 @@ use actix_web::{
 };
 use serde::Deserialize;
 
-use file_serve::db::{Db, FileEntry, Share};
+use file_serve::db::{CreateShareReq, Db, FileEntry, Share};
 
 #[get("/")]
 async fn hello() -> impl Responder {
@@ -39,18 +39,28 @@ async fn create_file(
     Ok(web::Json(file))
 }
 
+#[post("/admin/share")]
 async fn create_share(
     body: web::Json<CreateShareReq>,
-) -> Result<web::Json<Vec<Share>>, actix_web::Error> {
+) -> Result<web::Json<Share>, actix_web::Error> {
     let db = Db::new().map_err(ErrorInternalServerError)?;
+    let share = db.create_share(&body).map_err(ErrorInternalServerError)?;
+
+    Ok(web::Json(share))
 }
 
 /// ——— Bind + Serve ———
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| App::new().service(hello).service(get_shares))
-        .bind(("0.0.0.0", 8080))?
-        .run()
-        .await
+    HttpServer::new(|| {
+        App::new()
+            .service(hello)
+            .service(get_shares)
+            .service(create_file)
+            .service(create_share)
+    })
+    .bind(("0.0.0.0", 8080))?
+    .run()
+    .await
 }
