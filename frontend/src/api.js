@@ -1,13 +1,13 @@
-export async function getShare(slug) {
-    const res = await fetch(`/api/share/${slug}`);
+export async function fetchPublicShare(slug) {
+    const res = await fetch(`/api/share/${encodeURIComponent(slug)}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`server error: ${res.status}`);
     return res.json();
 }
 
-export async function startDownload(slug, password = "") {
-    const res = await fetch(`/api/download/${slug}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password })
-    });
-    return res;
+export function buildDownloadUrl(slug, password) {
+    const base = `/api/download/${encodeURIComponent(slug)}`;
+    if (!password) return base;
+    const params = new URLSearchParams({ password });
+    return `${base}?${params.toString()}`;
 }

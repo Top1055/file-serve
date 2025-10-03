@@ -605,6 +605,7 @@ dependencies = [
  "base64 0.21.7",
  "env_logger",
  "log",
+ "mime_guess",
  "rand",
  "rand_core 0.6.4",
  "rusqlite",

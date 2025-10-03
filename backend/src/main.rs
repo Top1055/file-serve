@@ -1,8 +1,14 @@
+use actix_files::NamedFile;
+use actix_web::http::header::{Charset, ExtendedValue};
 use actix_web::middleware::Logger;
 use actix_web::{
-    error::ErrorInternalServerError, get, post, web, App, HttpResponse, HttpServer, Responder,
+    error::{ErrorInternalServerError, ErrorUnauthorized},
+    get,
+    http::header::{ContentDisposition, DispositionParam, DispositionType},
+    post, web, App, HttpResponse, HttpServer, Responder, Result,
 };
 use serde::Deserialize;
+use std::path::PathBuf;
 
 use file_serve::db::{CreateShareReq, Db, FileEntry, PublicShare, Share};
 
@@ -12,6 +18,54 @@ async fn hello() -> impl Responder {
 }
 
 // ——— User section ———
+
+// Structs
+#[derive(Deserialize)]
+struct DownloadQuery {
+    // Optional: password or not
+    password: Option<String>,
+}
+
+#[get("/api/download/{slug}")]
+async fn download_file(path: web::Path<String>, q: web::Query<DownloadQuery>) -> Result<NamedFile> {
+    let slug = path.into_inner();
+    let password = q.password.as_deref().unwrap_or("");
+
+    let db = Db::new().map_err(ErrorInternalServerError)?;
+
+    match db.get_download_target(&slug, password) {
+        Ok(Some((abs_path, file_name))) => {
+            let path: PathBuf = abs_path.into();
+            let mut file = NamedFile::open(path).map_err(ErrorInternalServerError)?;
+
+            // Set Content-type
+            let ct = mime_guess::from_path(file.path()).first_or_octet_stream();
+            file = file.set_content_type(ct);
+
+            // Force download with UTF-8 filename
+            file = file.set_content_disposition(ContentDisposition {
+                disposition: DispositionType::Attachment,
+                parameters: vec![DispositionParam::FilenameExt(ExtendedValue {
+                    charset: Charset::Ext("UTF-8".to_owned()),
+                    language_tag: None,
+                    value: file_name.as_bytes().to_vec(),
+                })],
+            });
+
+            Ok(file)
+        }
+        Ok(None) => Err(actix_web::error::ErrorNotFound("share not found")),
+        Err(e) => {
+            //UnwindingPanic sentinel for incorrect password
+            let is_auth_error = matches!(e, rusqlite::Error::UnwindingPanic);
+            if is_auth_error {
+                Err(ErrorUnauthorized("Invalid password"))
+            } else {
+                Err(ErrorInternalServerError(e))
+            }
+        }
+    }
+}
 
 #[get("/api/share/{slug}")]
 async fn get_public_share(
@@ -76,9 +130,10 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .wrap(Logger::default())
+            .service(hello)
             // Customer services
             .service(get_public_share)
-            .service(hello)
+            .service(download_file)
             // Admin service
             .service(get_shares)
             .service(create_file)
