@@ -73,6 +73,7 @@ pub fn hash_password(password: &str) -> Result<String, PwHashError> {
     Ok(password_hash)
 }
 
+#[must_use]
 pub fn verify_password(password: &str, hash: &str) -> bool {
     let parsed_hash = PasswordHash::new(hash);
     if let Ok(parsed) = parsed_hash {
@@ -386,7 +387,7 @@ impl Db {
             .query_one(
                 "SELECT dl_count FROM share WHERE slug = ?1",
                 params![slug],
-                |r| Ok(r.get(0)?),
+                |r| r.get(0),
             )
             .optional()?
             .unwrap_or(-1);
@@ -406,8 +407,8 @@ impl Db {
     /// # Errors
     ///
     /// basic fail cases
-    /// runs check_password and increased_dl
-    /// if return error is UnwindingPanic: failed auth
+    /// runs `check_password` and `increased_dl`
+    /// if return error is `UnwindingPanic`: failed auth
     pub fn get_download_target(
         &self,
         slug: &str,
@@ -435,6 +436,6 @@ impl Db {
             return Err(rusqlite::Error::InvalidQuery);
         }
 
-        return abs_path;
+        abs_path
     }
 }
