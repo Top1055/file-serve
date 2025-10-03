@@ -15,8 +15,8 @@
 /frontend/dist/
 /frontend/.vite
 /frontend/.cache
-/frontend/package-lock.json
-/frontend/yarn.lock
+#/frontend/package-lock.json
+#/frontend/yarn.lock
 /frontend/pnpm-lock.yaml
 
 # -------------------------
