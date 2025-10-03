@@ -29,6 +29,7 @@ pub struct Share {
     pub expires_at: Option<String>,
     pub max_downloads: Option<i64>,
     pub dl_count: i64,
+    #[serde(skip_serializing)]
     pub password_hash: Option<String>,
     pub created_at: String,
 }

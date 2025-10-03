@@ -1,3 +1,4 @@
+use actix_web::middleware::Logger;
 use actix_web::{
     error::ErrorInternalServerError, get, post, web, App, HttpResponse, HttpServer, Responder,
 };
@@ -53,8 +54,10 @@ async fn create_share(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    env_logger::init();
     HttpServer::new(|| {
         App::new()
+            .wrap(Logger::default())
             .service(hello)
             .service(get_shares)
             .service(create_file)
