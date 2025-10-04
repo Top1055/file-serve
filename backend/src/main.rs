@@ -2,6 +2,7 @@ use actix_files::NamedFile;
 use actix_web::http::header::{Charset, ExtendedValue};
 use actix_web::middleware::Logger;
 use actix_web::{
+    delete,
     error::{ErrorInternalServerError, ErrorUnauthorized},
     get,
     http::header::{ContentDisposition, DispositionParam, DispositionType},
@@ -112,6 +113,18 @@ async fn create_file(
     Ok(web::Json(file))
 }
 
+#[delete("/admin/file/{file_id}")]
+async fn delete_file(path: web::Path<String>) -> Result<HttpResponse> {
+    let file_id = path.into_inner();
+    let db = Db::new().map_err(ErrorInternalServerError)?;
+    let deleted = db.delete_file(&file_id).map_err(ErrorInternalServerError)?;
+    if deleted {
+        Ok(HttpResponse::NoContent().finish())
+    } else {
+        Ok(HttpResponse::NotFound().finish())
+    }
+}
+
 #[post("/admin/share")]
 async fn create_share(
     body: web::Json<CreateShareReq>,
@@ -120,6 +133,18 @@ async fn create_share(
     let share = db.create_share(&body).map_err(ErrorInternalServerError)?;
 
     Ok(web::Json(share))
+}
+
+#[delete("/admin/share/{slug}")]
+async fn delete_share(path: web::Path<String>) -> Result<HttpResponse> {
+    let slug = path.into_inner();
+    let db = Db::new().map_err(ErrorInternalServerError)?;
+    let deleted = db.delete_share(&slug).map_err(ErrorInternalServerError)?;
+    if deleted {
+        Ok(HttpResponse::NoContent().finish())
+    } else {
+        Ok(HttpResponse::NotFound().finish())
+    }
 }
 
 // ——— Bind + Serve ———
@@ -137,7 +162,9 @@ async fn main() -> std::io::Result<()> {
             // Admin service
             .service(get_shares)
             .service(create_file)
+            .service(delete_file)
             .service(create_share)
+            .service(delete_share)
     })
     .bind(("0.0.0.0", 8080))?
     .run()

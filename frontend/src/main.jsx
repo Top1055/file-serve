@@ -1,9 +1,9 @@
 import React from "react";
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import DownloadPage from './pages/DownloadPage'
-import AdminPage from './pages/AdminPage'
-import NotFound from './pages/NotFound'
+import DownloadPage from './pages/DownloadPage/DownloadPage'
+import AdminPage from './pages/AdminPage/AdminPage'
+import NotFound from './pages/NotFound/NotFound'
 import './index.css'
 
 const router = createBrowserRouter([
